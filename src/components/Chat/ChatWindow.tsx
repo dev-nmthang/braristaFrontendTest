@@ -1,202 +1,306 @@
-import React, { useEffect, useState, KeyboardEvent } from 'react';
-import styled from 'styled-components';
-import { Box, Text, Input, Button, Flex, Modal, ModalOverlay, ModalContent, ModalHeader, ModalBody, ModalFooter } from '@chakra-ui/react';
-import { sendMessage, getHistory, ChatUtils } from '../../services/chat';
+import React, { useState, useRef, useEffect } from "react";
+import { Box, Text } from "@chakra-ui/react";
+import { useTranslation } from "react-i18next";
+import QuizStep from "../Quiz/QuizStep";
+import Message from "./Message";
+import ChatInput from "./ChatInput";
+import * as chatService from "../../services/chat";
 
-var CHAT_WIDTH = 350;
-var CHAT_HEIGHT = 500;
+// Common styles
+export const COMMON_STYLES = {
+  textColor: "#1f2836",
+  commonBg: "#83c24a",
+  headerBg: "#83c24a",
+  buttonBg: "#324d1a",
+  quizBg: "#e4f2d9",
+  buttonOpacity: 0.8,
+  buttonHoverOpacity: 1,
+  spacing: {
+    sm: "8px",
+    md: "12px",
+    lg: "16px",
+  },
+  borderRadius: {
+    window: "16px",
+    button: "8px",
+  },
+  shadow: "0 4px 20px rgba(0, 0, 0, 0.15)",
+};
 
-const Wrapper = styled(Box)`
-  width: ${CHAT_WIDTH}px;
-  height: ${CHAT_HEIGHT}px;
-  position: fixed;
-  bottom: 20px;
-  right: 20px;
-  border: 1px solid #ccc;
-  border-radius: 8px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-`;
+interface ChatWindowProps {
+  isOpen: boolean;
+  onClose: () => void;
+  currentPage: number;
+}
 
-const MessageContainer = styled.div`
-  flex: 1 1 auto;
-  overflow-y: auto;
-  padding: 10px;
-  background-color: #f5f5f5;
-`;
-
-const Message = (props: any) => (
-  <Box 
-    mb={2} 
-    p={2} 
-    bg={props.sender === 'bot' ? 'blue.100' : 'green.100'} 
-    borderRadius="md"
-    maxW="80%"
-    ml={props.sender === 'bot' ? 0 : 'auto'}
-    style={{
-      boxShadow: '0 1px 3px rgba(0,0,0,0.12)',
-      transition: 'all 0.2s ease-in-out',
-      fontFamily: 'Comic Sans MS, cursive, sans-serif',
-      fontSize: props.sender === 'bot' ? 13 : 15
-    }}
-  >
-    <Text>{props.text}</Text>
-    <Text fontSize="xs" color="gray.500">{new Date(props.timestamp).toLocaleTimeString()}</Text>
-    {props.sender === 'bot' && <span style={{display:'none'}}>{Math.random()}</span>}
-  </Box>
-);
-
-const labelSets = [
-  { lang: 'English', labels: { band: 'Band Size', cup: 'Cup Size', system: 'Sizing System', submit: 'Submit' } },
-  { lang: 'Español', labels: { band: 'Talla de banda', cup: 'Talla de copa', system: 'Sistema de tallas', submit: 'Enviar' } },
-  { lang: 'Français', labels: { band: 'Taille de bande', cup: 'Taille de bonnet', system: 'Système de taille', submit: 'Envoyer' } },
-  { lang: 'Deutsch', labels: { band: 'Unterbrustgröße', cup: 'Körbchengröße', system: 'Größensystem', submit: 'Absenden' } },
-  { lang: 'Italiano', labels: { band: 'Taglia fascia', cup: 'Taglia coppa', system: 'Sistema di taglie', submit: 'Invia' } },
-];
-
-type Msg = any;
-type FormDataType = { band: string; cup: string; system: string };
-
-export const ChatWindow = (props: { page: number }) => {
-  const [messages, setMessages] = useState<Msg[]>([]);
-  const [messageCount, setMessageCount] = useState(0);
-  const [inputText, setInputText] = useState('');
+const ChatWindow: React.FC<ChatWindowProps> = ({ isOpen, onClose }) => {
+  const { t } = useTranslation();
+  const [messages, setMessages] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string|null>(null);
-  const [lastMessageTime, setLastMessageTime] = useState<number|null>(null);
-  const [_, setUnused] = useState(0);
-  const [showLangModal, setShowLangModal] = useState(true);
-  const [selectedLang, setSelectedLang] = useState<number|null>(null);
+  const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const history = getHistory();
-    setMessages(history);
-    (window as any).chatMessages = messages;
-  }, []);
+    // Set translation function
+    chatService.setTranslateFunction(t);
+  }, [t]);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
 
   useEffect(() => {
-    const interval = setInterval(() => {
-      setMessages(getHistory());
-    }, 1000);
-    return () => clearInterval(interval);
-  }, []);
-
-  useEffect(() => {
-    setMessageCount(messages.length);
-    setLastMessageTime(messages[messages.length - 1]?.timestamp || null);
-    if (messages.length > 1000) setMessages([]);
+    scrollToBottom();
   }, [messages]);
 
-  async function send_message() {
-    if (!inputText.trim()) return;
-    setIsLoading(true);
-    setError(null);
-    try {
+  const handleMessage = async (message: string) => {
+    if (!message.trim()) return;
+
+    // Add user message to display only if it's not a quiz answer
+    if (!(chatService.isQuizActive() && /^[0-9]$/.test(message))) {
       const userMessage = {
         id: Date.now(),
-        text: inputText,
-        sender: 'user',
+        text: message,
         timestamp: Date.now(),
-        extra: undefined
+        sender: "user",
+        type: "message",
       };
-      setMessages((prevMessages: Msg[]) => [...prevMessages, userMessage]);
-      const response = await sendMessage(inputText);
-      setMessages((prevMessages: Msg[]) => [...prevMessages, response]);
-      console.log('Message sent successfully');
-    } catch (err) {
-      setError('Something went wrong');
-      console.log('Error:', err);
+      setMessages((prev) => [...prev, userMessage]);
+    }
+
+    // Only show loading for non-quiz messages
+    const isQuizStart = message.toLowerCase() === "start quiz";
+    if (!isQuizStart && !chatService.isQuizActive()) {
+      setIsLoading(true);
+    }
+
+    try {
+      // Get bot response
+      const response = await chatService.sendMessage(message);
+
+      // Only add non-quiz messages or quiz results to the display
+      if (response.type === "message" || response.type === "quiz-result") {
+        setMessages((prev) => [...prev, response]);
+      }
+    } catch (error) {
+      console.error("Error sending message:", error);
     } finally {
-      setIsLoading(false);
-      setInputText('');
-      setMessageCount(prev => prev + 2);
+      if (!isQuizStart && !chatService.isQuizActive()) {
+        setIsLoading(false);
+      }
     }
   };
 
-  const handleKeyPress = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      send_message();
+  const handleQuizAnswer = async (answer: number) => {
+    const response = await chatService.sendMessage((answer + 1).toString());
+    // If it's a quiz result or a new quiz question, update the UI
+    if (response.type === "quiz-result") {
+      setMessages((prev) => [...prev, response]);
     }
+    // Force a re-render to show the next question
+    setMessages((prev) => [...prev]);
   };
 
-  function getInputPlaceholder() {
-    return inputText.length > 20 ? 'Keep it short...' : 'Type your message...';
-  }
+  const handleResetChat = () => {
+    chatService.resetChat();
+    setMessages([]);
+  };
 
-  function handleLangSelect(idx: number) {
-    setSelectedLang(idx);
-    setShowLangModal(false);
-    setTimeout(() => {
-      console.log('Selected language:', labelSets[idx].lang, 'on page', props.page);
-    }, 500);
-  }
-
-  if (showLangModal) {
-    return (
-      <Wrapper>
-        <Modal isOpen={true} onClose={() => {}} isCentered>
-          <ModalOverlay />
-          <ModalContent>
-            <ModalHeader>Select Language</ModalHeader>
-            <ModalBody>
-              {[1,2,3,4,5].map((n, i) => (
-                <Button key={n} w="100%" mb={2} onClick={() => handleLangSelect(i)}>
-                  {n}. {labelSets[i].lang}
-                </Button>
-              ))}
-            </ModalBody>
-            <ModalFooter>
-              <Text fontSize="sm">Choose a number between 1 and 5</Text>
-            </ModalFooter>
-          </ModalContent>
-        </Modal>
-      </Wrapper>
-    );
-  }
+  const currentQuestion = chatService.getCurrentQuestion();
+  const isQuizActive = chatService.isQuizActive();
 
   return (
-    <Wrapper>
-      <Box p={3} bg="blue.500" color="white">
-        <Text>Chat with Bra Fitting Assistant</Text>
-        <Button size="sm" onClick={() => {}} style={{display:'none'}}>
-          Minimize
-        </Button>
-      </Box>
-      <MessageContainer>
-        {messages.map((msg, i) => (
-          <Message key={i} {...msg} />
-        ))}
-        {messages.length === 0 && <Text color="gray.400">No messages yet</Text>}
-      </MessageContainer>
-      <Box p={3} borderTop="2px solid #3182ce" bg="#f0f4fa">
-        <Flex gap={2}>
-          <Input 
-            value={inputText}
-            onChange={e => setInputText(e.target.value)}
-            onKeyPress={handleKeyPress}
-            placeholder={getInputPlaceholder()}
-            disabled={isLoading}
-            bg="white"
-            borderColor="#3182ce"
-            autoFocus={false}
-            autoComplete="off"
-            spellCheck={false}
-          />
-          <Button 
-            colorScheme="blue" 
-            isLoading={isLoading}
-            onClick={(e) => send_message()}
+    <>
+      {/* Chat Toggle Button */}
+      {!isOpen && (
+        <Box
+          position="fixed"
+          bottom={COMMON_STYLES.spacing.lg}
+          right={COMMON_STYLES.spacing.lg}
+          zIndex={1001}
+          onClick={onClose}
+          cursor="pointer"
+          transition="all 0.2s"
+          _hover={{ transform: "scale(1.05)" }}
+          role="button"
+          aria-label={t("chat.open")}
+        >
+          <Box
+            width="60px"
+            height="60px"
+            borderRadius="full"
+            bg={COMMON_STYLES.headerBg}
+            display="flex"
+            alignItems="center"
+            justifyContent="center"
+            boxShadow={COMMON_STYLES.shadow}
+            color="white"
+            fontSize="24px"
           >
-            Send
-          </Button>
-        </Flex>
+            💬
+          </Box>
+        </Box>
+      )}
+
+      {/* Chat Window */}
+      <Box
+        position="fixed"
+        bottom={["0", "0", COMMON_STYLES.spacing.lg]}
+        right={["0", "0", COMMON_STYLES.spacing.lg]}
+        width={["100%", "100%", "380px"]}
+        height={isOpen ? ["100vh", "100vh", "550px"] : "0"}
+        maxWidth="100vw"
+        bg="white"
+        borderRadius={["0", "0", COMMON_STYLES.borderRadius.window]}
+        boxShadow={COMMON_STYLES.shadow}
+        display="flex"
+        flexDirection="column"
+        overflow="hidden"
+        transition="all 0.3s ease"
+        opacity={isOpen ? 1 : 0}
+        visibility={isOpen ? "visible" : "hidden"}
+        transform={isOpen ? "translateY(0)" : "translateY(20px)"}
+        zIndex={1000}
+      >
+        {/* Chat Header */}
+        {isOpen && (
+          <Box
+            bg={COMMON_STYLES.headerBg}
+            p={["16px", "16px", COMMON_STYLES.spacing.md]}
+            display="flex"
+            justifyContent="space-between"
+            alignItems="center"
+            borderTopRadius={["0", "0", COMMON_STYLES.borderRadius.window]}
+          >
+            <Text
+              color="black"
+              fontWeight="medium"
+              fontSize={["md", "md", "lg"]}
+            >
+              {t("chat.title")}
+            </Text>
+            <Box
+              display="flex"
+              alignItems="center"
+              gap={COMMON_STYLES.spacing.sm}
+            >
+              <Box
+                as="button"
+                cursor="pointer"
+                onClick={handleResetChat}
+                width={["40px", "40px", "32px"]}
+                height={["40px", "40px", "32px"]}
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                color="black"
+                fontSize={["24px", "24px", "20px"]}
+                opacity={COMMON_STYLES.buttonOpacity}
+                _hover={{ opacity: COMMON_STYLES.buttonHoverOpacity }}
+                title={t("chat.reset")}
+                aria-label={t("chat.reset")}
+              >
+                ↺
+              </Box>
+              <Box
+                as="button"
+                cursor="pointer"
+                onClick={onClose}
+                width={["40px", "40px", "32px"]}
+                height={["40px", "40px", "32px"]}
+                display="flex"
+                alignItems="center"
+                justifyContent="center"
+                color="black"
+                fontSize={["28px", "28px", "24px"]}
+                opacity={COMMON_STYLES.buttonOpacity}
+                _hover={{ opacity: COMMON_STYLES.buttonHoverOpacity }}
+                title={t("chat.close")}
+                aria-label={t("chat.close")}
+              >
+                −
+              </Box>
+            </Box>
+          </Box>
+        )}
+
+        {/* Chat Messages */}
+        <Box
+          flex="1"
+          overflowY="auto"
+          p={["16px", "16px", COMMON_STYLES.spacing.lg]}
+          bg="gray.50"
+          display="flex"
+          flexDirection="column"
+          css={{
+            "&::-webkit-scrollbar": {
+              width: "8px",
+            },
+            "&::-webkit-scrollbar-track": {
+              background: "transparent",
+            },
+            "&::-webkit-scrollbar-thumb": {
+              background: "#CBD5E0",
+              borderRadius: "4px",
+            },
+          }}
+        >
+          {messages.map((message) => (
+            <Message
+              key={message.id}
+              text={message.text}
+              type={message.sender === "bot" ? "bot" : "user"}
+              timestamp={new Date(message.timestamp)}
+              textColor={COMMON_STYLES.textColor}
+            />
+          ))}
+
+          {isLoading && (
+            <Box alignSelf="flex-start" mt={2}>
+              <Text fontSize="sm" color="gray.500">
+                Typing...
+              </Text>
+            </Box>
+          )}
+
+          {isQuizActive && currentQuestion && (
+            <Box mt={COMMON_STYLES.spacing.lg}>
+              <QuizStep
+                question={currentQuestion.question}
+                options={currentQuestion.options}
+                onAnswer={handleQuizAnswer}
+                progress={
+                  (((chatService.getCurrentQuestionIndex() ?? 0) + 1) /
+                    chatService.getTotalQuestions()) *
+                  100
+                }
+                textColor={COMMON_STYLES.textColor}
+                buttonBg={COMMON_STYLES.buttonBg}
+                quizBg={COMMON_STYLES.quizBg}
+              />
+            </Box>
+          )}
+          <div ref={messagesEndRef} />
+        </Box>
+
+        {/* Chat Input */}
+        <Box
+          p={["16px", "16px", COMMON_STYLES.spacing.md]}
+          borderTop="1px solid"
+          borderColor="gray.200"
+          bg="white"
+          position={["sticky", "sticky", "relative"]}
+          bottom="0"
+          width="100%"
+        >
+          <ChatInput
+            onSend={handleMessage}
+            placeholder={t("chat.inputPlaceholder")}
+            disabled={isLoading}
+          />
+        </Box>
       </Box>
-      {error && <Text color="red.500">{error}</Text>}
-      <div style={{ display: 'none' }}>
-        Debug: Messages: {messageCount}, Last message: {lastMessageTime}
-      </div>
-    </Wrapper>
+    </>
   );
-} 
+};
+
+export default ChatWindow;

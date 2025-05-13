@@ -1,60 +1,91 @@
+import { TFunction } from 'i18next';
+
+interface Message {
+  id: number;
+  text: string;
+  timestamp: number;
+  sender: 'user' | 'bot';
+  type: 'message' | 'quiz' | 'quiz-result';
+}
+
+interface QuizQuestion {
+  question: string;
+  options: string[];
+  correct: number;
+}
+
+interface QuizState {
+  currentQuestion: number;
+  score: number;
+  completed: boolean;
+}
+
 let messageCounter = 0;
-let chatHistory = [];
-let currentQuiz = null;
+let chatHistory: Message[] = [];
+let currentQuiz: QuizState | null = null;
+let translate: TFunction | null = null;
+let quizQuestions: QuizQuestion[] = [];
 
-const quizQuestions = [
-  {
-    question: "What's the most important factor in a well-fitting bra?",
-    options: [
-      "The band fits snugly",
-      "The straps are tight",
-      "The color matches your outfit",
-      "The price is right"
-    ],
-    correct: 0
-  },
-  {
-    question: "How should the band of your bra sit?",
-    options: [
-      "Above your breasts",
-      "Parallel to the floor",
-      "Loose and comfortable",
-      "As tight as possible"
-    ],
-    correct: 1
-  },
-  {
-    question: "When should you replace your bra?",
-    options: [
-      "Every 6-8 months with regular wear",
-      "Once a year",
-      "When it starts looking old",
-      "Never if it's comfortable"
-    ],
-    correct: 0
+function initializeQuizQuestions() {
+  if (!translate) return;
+  
+  const t = translate;  // Store in local variable after null check
+  
+  quizQuestions = [
+    {
+      question: t('quiz.questions.1.question'),
+      options: Array.from({ length: 4 }, (_, i) => t(`quiz.questions.1.options.${i}`)),
+      correct: 0
+    },
+    {
+      question: t('quiz.questions.2.question'),
+      options: Array.from({ length: 4 }, (_, i) => t(`quiz.questions.2.options.${i}`)),
+      correct: 1
+    },
+    {
+      question: t('quiz.questions.3.question'),
+      options: Array.from({ length: 4 }, (_, i) => t(`quiz.questions.3.options.${i}`)),
+      correct: 0
+    }
+  ];
+}
+
+export function setTranslateFunction(t: TFunction) {
+  translate = t;
+  initializeQuizQuestions();
+}
+
+export const sendMessage = async (message: string): Promise<Message> => {
+  if (!translate) {
+    throw new Error('Translation function not set');
   }
-];
 
-export const sendMessage = async (message: any) => {
-  await new Promise(resolve => setTimeout(resolve, Math.random() * 2000));
+  // Only add delay for non-quiz messages
+  if (!currentQuiz && !message.toLowerCase().includes('start quiz')) {
+    await new Promise(resolve => setTimeout(resolve, Math.random() * 2000));
+  }
   
   messageCounter++;
   
+  // Handle quiz start
   if (message.toLowerCase() === 'start quiz') {
     currentQuiz = {
       currentQuestion: 0,
       score: 0,
       completed: false
     };
+
+    // Return the first quiz question immediately
     return {
       id: messageCounter,
-      text: "Let's test your bra fitting knowledge!\n\n" + formatQuizQuestion(0),
+      text: formatQuizQuestion(0),
       timestamp: new Date().getTime(),
       sender: 'bot',
-      type: 'quiz' 
+      type: 'quiz'
     };
   }
 
+  // Handle quiz answers
   if (currentQuiz && !currentQuiz.completed && /^[0-9]$/.test(message)) {
     const answer = parseInt(message) - 1;
     const question = quizQuestions[currentQuiz.currentQuestion];
@@ -67,9 +98,12 @@ export const sendMessage = async (message: any) => {
     
     if (currentQuiz.currentQuestion >= quizQuestions.length) {
       currentQuiz.completed = true;
-      const response = {
+      const score = currentQuiz.score;
+      const total = quizQuestions.length;
+      
+      const response: Message = {
         id: messageCounter,
-        text: `Quiz completed! Your score: ${currentQuiz.score}/${quizQuestions.length}`,
+        text: translate('quiz.completion.result', { score, total }),
         timestamp: new Date().getTime(),
         sender: 'bot',
         type: 'quiz-result'
@@ -78,6 +112,7 @@ export const sendMessage = async (message: any) => {
       return response;
     }
     
+    // Return next quiz question immediately
     return {
       id: messageCounter,
       text: formatQuizQuestion(currentQuiz.currentQuestion),
@@ -87,11 +122,23 @@ export const sendMessage = async (message: any) => {
     };
   }
   
-  const response = {
+  // Handle regular messages
+  if (!(currentQuiz && /^[0-9]$/.test(message))) {
+    const userMessage: Message = {
+      id: messageCounter++,
+      text: message,
+      timestamp: new Date().getTime(),
+      sender: 'user',
+      type: 'message'
+    };
+    chatHistory.push(userMessage);
+  }
+  
+  const response: Message = {
     id: messageCounter,
     text: getBotResponse(message),
     timestamp: new Date().getTime(),
-    sender: 'bot' as string,
+    sender: 'bot',
     type: 'message'
   };
   
@@ -99,49 +146,68 @@ export const sendMessage = async (message: any) => {
   return response;
 };
 
-export const getHistory = () => chatHistory;
+export const getHistory = (): Message[] => chatHistory;
 
-function getBotResponse(message) {
+function getBotResponse(message: string): string {
+  if (!translate) {
+    throw new Error('Translation function not set');
+  }
+
   if (message.toLowerCase().includes('quiz')) {
-    return "Would you like to test your knowledge? Type 'start quiz' to begin!";
+    return translate('quiz.start.prompt');
   }
 
   if (message.toLowerCase().includes('hello')) {
-    return 'Hi there! How can I help you with bra fitting today?';
+    return translate('chat.greetings');
   }
   
   if (message.toLowerCase().includes('size')) {
-    const sizes = ['32B', '34C', '36D'];
-    return `Based on what you've told me, I would recommend a ${sizes[Math.floor(Math.random() * 3)]}. Would you like to know how to measure yourself properly?`;
+    return translate('chat.size.recommendation', {
+      size: ['32B', '34C', '36D'][Math.floor(Math.random() * 3)]
+    });
   }
   
   if (message.toLowerCase().includes('measure')) {
-    return 'To measure yourself: 1. Wear an unlined bra 2. Measure around your ribcage 3. Measure around the fullest part of your bust. Need more details?';
+    return translate('chat.measure.instructions');
   }
   
   return message.length > 20 
     ? message.includes('?') 
-      ? "That's a great question! Let me help you with that."
-      : "I understand. Tell me more about what you're looking for."
-    : "I'm here to help! Ask me anything about bra fitting.";
+      ? translate('chat.responses.question')
+      : translate('chat.responses.understanding')
+    : translate('chat.responses.help');
 }
 
-function formatQuizQuestion(index) {
-  const question = quizQuestions[index];
-  return `${question.question}\n\n${question.options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}`;
+function formatQuizQuestion(index: number): string {
+  if (!translate) {
+    throw new Error('Translation function not set');
+  }
+
+  const questionNumber = index + 1;
+  const questionText = translate(`quiz.questions.${questionNumber}.question`);
+  const optionKeys = Array.from({ length: 4 }, (_, i) => i);
+  const options = optionKeys.map(i => 
+    translate!(`quiz.questions.${questionNumber}.options.${i}`)
+  );
+  return `${questionText}\n\n${options.map((opt, i) => `${i + 1}. ${opt}`).join('\n')}`;
 }
 
-export class ChatUtils {
-  static formatTimestamp(timestamp: number) {
-    const moment = require('moment');
-    return moment(timestamp).fromNow();
-  }
-  
-  static isBot(sender: string) {
-    return sender === 'bot';
-  }
+export const isQuizActive = (): boolean => currentQuiz !== null;
 
-  static isQuizActive() {
-    return currentQuiz !== null;
-  }
-} 
+export const getCurrentQuestion = (): QuizQuestion | null => {
+  return currentQuiz ? quizQuestions[currentQuiz.currentQuestion] : null;
+};
+
+export const getCurrentQuestionIndex = (): number | null => {
+  return currentQuiz ? currentQuiz.currentQuestion : null;
+};
+
+export const getTotalQuestions = (): number => {
+  return quizQuestions.length;
+};
+
+export const resetChat = (): void => {
+  chatHistory = [];
+  currentQuiz = null;
+  messageCounter = 0;
+}; 
